@@ -6,6 +6,9 @@ Optional: ANTHROPIC_API_KEY=xxxx  (សម្រាប់ /ask, /summary និ�
 """
 import asyncio
 import ast
+import csv
+import io
+import math
 import datetime as dt
 import json
 import operator
@@ -495,11 +498,44 @@ async def story(u, c):
     await u.message.reply_text("📖 " + (" ".join(st) if st else "រឿងនៅទទេ! វាយ /story <ប្រយោគ> ដើម្បីចាប់ផ្តើម"))
 
 
+POLL_GUIDE = (
+    "📊 របៀបប្រើ /poll\n"
+    "/poll សំណួរ | ជម្រើស១ | ជម្រើស២ | ...\n\n"
+    "ឧទាហរណ៍:\n"
+    "/poll ចូលចិត្តផ្លែឈើអ្វី? | ស្វាយ | ចេក | ម្នាស់\n\n"
+    "ជម្រើសបន្ថែម (ដាក់មុនសំណួរ):\n"
+    "-m  ➜ ជ្រើសបានច្រើនចម្លើយ\n"
+    "-a  ➜ បោះឆ្នោតមិនបង្ហាញឈ្មោះ\n"
+    "ឧទាហរណ៍: /poll -a -m ចង់ញ៉ាំអ្វី? | ភ្លាយ | ខ្លួច\n\n"
+    "ដែនកំណត់: សំណួរ ≤ ៣០០ តួ, ជម្រើស ២–១០, ជម្រើសនីមួយៗ ≤ ១០០ តួ"
+)
+
+
 async def poll(u, c):
-    parts = [p.strip() for p in args_text(c).split("|") if p.strip()]
+    raw = args_text(c)
+    if not raw:
+        return await u.message.reply_text(POLL_GUIDE)
+    multi = anon = False
+    while raw.startswith("-"):
+        flag, _, raw = raw.partition(" ")
+        raw = raw.strip()
+        if flag == "-m":
+            multi = True
+        elif flag == "-a":
+            anon = True
+        else:
+            return await u.message.reply_text(f"❌ មិនស្គាល់ជម្រើស {flag}\n\n" + POLL_GUIDE)
+    parts = [x.strip() for x in raw.split("|") if x.strip()]
     if len(parts) < 3:
-        return await u.message.reply_text("ប្រើ: /poll សំណួរ | ជម្រើស១ | ជម្រើស២")
-    await u.effective_chat.send_poll(parts[0], parts[1:10], is_anonymous=False)
+        return await u.message.reply_text("❌ ត្រូវមានសំណួរ និងយ៉ាងហោចណាស់ ២ ជម្រើស\n\n" + POLL_GUIDE)
+    q, opts = parts[0], parts[1:]
+    if len(q) > 300:
+        return await u.message.reply_text("❌ សំណួរវែងពេក (អតិបរមា ៣០០ តួ)")
+    if len(opts) > 10:
+        return await u.message.reply_text("❌ ជម្រើសច្រើនពេក (អតិបរមា ១០)")
+    if any(len(o) > 100 for o in opts):
+        return await u.message.reply_text("❌ ជម្រើសមួយវែងពេក (អតិបរមា ១០០ តួ)")
+    await u.effective_chat.send_poll(q, opts, is_anonymous=anon, allows_multiple_answers=multi)
 
 
 async def rank(u, c):
@@ -819,11 +855,134 @@ async def daily(u, c):
     await u.message.reply_text(await build_daily(cid))
 
 
+# ---------------------------------------------------------------- [6] map & route
+async def geocode(q):
+    d = await get_json("https://nominatim.openstreetmap.org/search", q=q, format="json", limit=1,
+                       **{"accept-language": "km,en"})
+    if not d:
+        return None
+    r = d[0]
+    name = ", ".join(r.get("display_name", q).split(", ")[:3])
+    return float(r["lat"]), float(r["lon"]), name
+
+
+def osm_link(lat, lon):
+    return f"https://www.openstreetmap.org/?mlat={lat}&mlon={lon}#map=15/{lat}/{lon}"
+
+
+def gmaps_link(lat, lon):
+    return f"https://www.google.com/maps/search/?api=1&query={lat},{lon}"
+
+
+def gdir_link(a, b):
+    return (f"https://www.google.com/maps/dir/?api=1&origin={a[0]},{a[1]}"
+            f"&destination={b[0]},{b[1]}&travelmode=driving")
+
+
+def haversine_km(a, b):
+    la1, lo1, la2, lo2 = map(math.radians, (a[0], a[1], b[0], b[1]))
+    h = math.sin((la2 - la1) / 2) ** 2 + math.cos(la1) * math.cos(la2) * math.sin((lo2 - lo1) / 2) ** 2
+    return 2 * 6371 * math.asin(math.sqrt(h))
+
+
+async def map_cmd(u, c):
+    q = args_text(c)
+    if not q:
+        return await u.message.reply_text("ប្រើ៖ /map ឈ្មោះកន្លែង\nឧទាហរណ៍: /map ស្វាយរៀង")
+    try:
+        g = await geocode(q)
+    except Exception:
+        g = None
+    if not g:
+        return await u.message.reply_text("រកមិនឃើញកន្លែងនេះទេ 🗺 សាកវាយឈ្មោះផ្សេង ឬបន្ថែមខេត្ត")
+    lat, lon, name = g
+    await u.message.reply_location(latitude=lat, longitude=lon)
+    await u.message.reply_text(f"📍 {name}\n\n🗺 OpenStreetMap: {osm_link(lat, lon)}\n"
+                               f"🌐 Google Maps: {gmaps_link(lat, lon)}", disable_web_page_preview=True)
+
+
+async def route_cmd(u, c):
+    raw = args_text(c)
+    usage = "ប្រើ៖ /route ចំណុចចាប់ផ្តើម ទៅ ចំណុចចុងក្រោយ\nឧទាហរណ៍: /route ភ្នំពេញ ទៅ សៀមរាប"
+    sep = next((x for x in (" ទៅ ", " to ", "->") if x in raw), None)
+    if not sep:
+        return await u.message.reply_text(usage)
+    a_txt, b_txt = [x.strip() for x in raw.split(sep, 1)]
+    if not a_txt or not b_txt:
+        return await u.message.reply_text(usage)
+    try:
+        ga, gb = await geocode(a_txt), await geocode(b_txt)
+    except Exception:
+        ga = gb = None
+    if not ga or not gb:
+        return await u.message.reply_text("រកមិនឃើញចំណុចមួយ ឬទាំងពីរ 🗺 សាកវាយឈ្មោះផ្សេង")
+
+    km = haversine_km(ga, gb)
+    mins = None
+    try:
+        d = await get_json(f"https://router.project-osrm.org/route/v1/driving/"
+                           f"{ga[1]},{ga[0]};{gb[1]},{gb[0]}", overview="false")
+        r = d["routes"][0]
+        km, mins = r["distance"] / 1000, r["duration"] / 60
+    except Exception:
+        pass
+
+    await u.message.reply_location(latitude=ga[0], longitude=ga[1])
+    await u.message.reply_location(latitude=gb[0], longitude=gb[1])
+    if mins is not None:
+        info = f"🛣 ចម្ងាយ ~{km:,.0f} km | ⏱ ~{mins / 60:.1f} ម៉ោង (ជិះឡាន)"
+    else:
+        info = f"🛣 ចម្ងាយបន្ទាត់ត្រង់ ~{km:,.0f} km (មិនអាចគណនាផ្លូវបាន)"
+    await u.message.reply_text(
+        f"{info}\n\n📍 ពី: {ga[2]}\n📍 ទៅ: {gb[2]}\n\n"
+        f"🌐 ផ្លូវ Google Maps: {gdir_link(ga, gb)}\n"
+        f"⚠️ ពេលវេលាប្រហាក់ប្រហែល ពឹងលើផ្លូវ និងចរាចរណ៍", disable_web_page_preview=True)
+
+
+# ---------------------------------------------------------------- [7] international stocks
+STOCKS = [("🚗 Tesla", "tsla.us"), ("🎮 NVIDIA", "nvda.us"), ("📘 Facebook (Meta)", "meta.us"),
+          ("🔍 Google", "googl.us"), ("🍎 Apple", "aapl.us"), ("🪟 Microsoft", "msft.us"),
+          ("📦 Amazon", "amzn.us"), ("🎬 Netflix", "nflx.us"), ("💻 Intel", "intc.us"),
+          ("🛢 ប្រេងឆៅ WTI", "cl.f")]
+
+
+async def stooq_quote(sym):
+    text = await get_text(f"https://stooq.com/q/l/?s={sym}&f=sd2t2ohlcv&h&e=csv")
+    rows = list(csv.reader(io.StringIO(text.strip())))
+    if len(rows) < 2 or rows[1][3] in ("N/D", ""):
+        return None
+    o, cl = float(rows[1][3]), float(rows[1][6])
+    return cl, (cl - o) / o * 100
+
+
+async def stock(u, c):
+    wanted = args_text(c).lower()
+    items = STOCKS
+    if wanted:
+        items = [x for x in STOCKS if wanted in x[1].lower() or wanted in x[0].lower()]
+        if not items:
+            return await u.message.reply_text("ប្រើ /stock ឬ /stock tsla | nvda | meta | googl | aapl | msft | amzn | nflx | intc | cl.f")
+    lines = ["📈 តម្លៃភាគហ៊ុនអន្តរជាតិ (USD)", ""]
+    for label, sym in items:
+        try:
+            q = await stooq_quote(sym)
+        except Exception:
+            q = None
+        if q is None:
+            lines.append(f"{label}: មិនអាចទាញបាន")
+            continue
+        price, pct = q
+        arrow = "🟢 ▲" if pct >= 0 else "🔴 ▼"
+        lines.append(f"{label}: ${price:,.2f}  {arrow} {pct:+.2f}%")
+    lines.append("\n⚠️ តម្លៃអាចយឺតជាងការពិត ហើយ % គិតពីពេលបើកផ្សារ")
+    await u.message.reply_text("\n".join(lines))
+
+
 HELP = """🤖 Koval Bot - បញ្ជី Command
 😄 ជជែក: /hello /joke /riddle /quote /roast /compliment /truth /dare /wouldyou /fact
-📰 ព័ត៌មាន: /news /tech /sport /weather /exchange /gold /crypto /today /holiday /trend
+📰 ព័ត៌មាន: /news /tech /sport /weather /exchange /gold /stock /crypto /today /holiday /trend
 🎮 ល្បែង: /quiz /guess /dice /coin /rps /wordgame /math /story /poll /rank
-🛠 ឧបករណ៍: /translate /define /calc /convert /remind /timer /time /summary /search /ask
+🛠 ឧបករណ៍: /map /route /translate /define /calc /convert /remind /timer /time /summary /search /ask
 👥 ក្រុម: /rules /welcome /birthday /admin /report /warn /mute /stats /daily /help"""
 
 
@@ -894,6 +1053,7 @@ COMMANDS = {
     "rules": rules, "welcome": welcome, "birthday": birthday, "admin": admin_list, "report": report,
     "warn": warn, "mute": mute, "stats": stats, "daily": daily, "help": help_cmd, "start": help_cmd,
     "reveal": reveal,
+    "map": map_cmd, "route": route_cmd, "stock": stock,
 }
 
 
