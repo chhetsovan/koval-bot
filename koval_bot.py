@@ -8,14 +8,12 @@ import asyncio
 import ast
 import csv
 import io
-import math
 import datetime as dt
 import json
 import operator
 import os
 import random
 import xml.etree.ElementTree as ET
-from urllib.parse import quote as url_quote
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -25,6 +23,8 @@ from telegram.ext import (Application, CommandHandler, ContextTypes, Defaults,
 
 AUTO_DELETE_SECONDS = 3 * 24 * 60 * 60  # លុបសាររបស់ bot បន្ទាប់ពី 3 ថ្ងៃ
 NO_DELETE = {"sendPoll"}   # មិនលុប poll ព្រោះលុបហើយ vote ក៏បាត់
+
+from khmer_food import FOODS
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 AI_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip()
@@ -857,90 +857,6 @@ async def daily(u, c):
     await u.message.reply_text(await build_daily(cid))
 
 
-# ---------------------------------------------------------------- [6] map & route
-async def geocode(q):
-    d = await get_json("https://nominatim.openstreetmap.org/search", q=q, format="json", limit=1,
-                       **{"accept-language": "km,en"})
-    if not d:
-        return None
-    r = d[0]
-    name = ", ".join(r.get("display_name", q).split(", ")[:3])
-    return float(r["lat"]), float(r["lon"]), name
-
-
-def osm_link(lat, lon):
-    return f"https://www.openstreetmap.org/?mlat={lat}&mlon={lon}#map=15/{lat}/{lon}"
-
-
-def gmaps_link(lat, lon):
-    return f"https://www.google.com/maps/search/?api=1&query={lat},{lon}"
-
-
-def gdir_link(a, b):
-    return (f"https://www.google.com/maps/dir/?api=1&origin={a[0]},{a[1]}"
-            f"&destination={b[0]},{b[1]}&travelmode=driving")
-
-
-def haversine_km(a, b):
-    la1, lo1, la2, lo2 = map(math.radians, (a[0], a[1], b[0], b[1]))
-    h = math.sin((la2 - la1) / 2) ** 2 + math.cos(la1) * math.cos(la2) * math.sin((lo2 - lo1) / 2) ** 2
-    return 2 * 6371 * math.asin(math.sqrt(h))
-
-
-async def map_cmd(u, c):
-    q = args_text(c)
-    if not q:
-        return await u.message.reply_text("ប្រើ៖ /map ឈ្មោះកន្លែង\nឧទាហរណ៍: /map ស្វាយរៀង")
-    try:
-        g = await geocode(q)
-    except Exception:
-        g = None
-    if not g:
-        return await u.message.reply_text("រកមិនឃើញកន្លែងនេះទេ 🗺 សាកវាយឈ្មោះផ្សេង ឬបន្ថែមខេត្ត")
-    lat, lon, name = g
-    await u.message.reply_location(latitude=lat, longitude=lon)
-    await u.message.reply_text(f"📍 {name}\n\n🗺 OpenStreetMap: {osm_link(lat, lon)}\n"
-                               f"🌐 Google Maps: {gmaps_link(lat, lon)}", disable_web_page_preview=True)
-
-
-async def route_cmd(u, c):
-    raw = args_text(c)
-    usage = "ប្រើ៖ /route ចំណុចចាប់ផ្តើម ទៅ ចំណុចចុងក្រោយ\nឧទាហរណ៍: /route ភ្នំពេញ ទៅ សៀមរាប"
-    sep = next((x for x in (" ទៅ ", " to ", "->") if x in raw), None)
-    if not sep:
-        return await u.message.reply_text(usage)
-    a_txt, b_txt = [x.strip() for x in raw.split(sep, 1)]
-    if not a_txt or not b_txt:
-        return await u.message.reply_text(usage)
-    try:
-        ga, gb = await geocode(a_txt), await geocode(b_txt)
-    except Exception:
-        ga = gb = None
-    if not ga or not gb:
-        return await u.message.reply_text("រកមិនឃើញចំណុចមួយ ឬទាំងពីរ 🗺 សាកវាយឈ្មោះផ្សេង")
-
-    km = haversine_km(ga, gb)
-    mins = None
-    try:
-        d = await get_json(f"https://router.project-osrm.org/route/v1/driving/"
-                           f"{ga[1]},{ga[0]};{gb[1]},{gb[0]}", overview="false")
-        r = d["routes"][0]
-        km, mins = r["distance"] / 1000, r["duration"] / 60
-    except Exception:
-        pass
-
-    await u.message.reply_location(latitude=ga[0], longitude=ga[1])
-    await u.message.reply_location(latitude=gb[0], longitude=gb[1])
-    if mins is not None:
-        info = f"🛣 ចម្ងាយ ~{km:,.0f} km | ⏱ ~{mins / 60:.1f} ម៉ោង (ជិះឡាន)"
-    else:
-        info = f"🛣 ចម្ងាយបន្ទាត់ត្រង់ ~{km:,.0f} km (មិនអាចគណនាផ្លូវបាន)"
-    await u.message.reply_text(
-        f"{info}\n\n📍 ពី: {ga[2]}\n📍 ទៅ: {gb[2]}\n\n"
-        f"🌐 ផ្លូវ Google Maps: {gdir_link(ga, gb)}\n"
-        f"⚠️ ពេលវេលាប្រហាក់ប្រហែល ពឹងលើផ្លូវ និងចរាចរណ៍", disable_web_page_preview=True)
-
-
 # ---------------------------------------------------------------- [7] international stocks
 STOCKS = [("🚗 Tesla", "TSLA"), ("🎮 NVIDIA", "NVDA"), ("📘 Facebook (Meta)", "META"),
           ("🔍 Google", "GOOGL"), ("🍎 Apple", "AAPL"), ("🪟 Microsoft", "MSFT"),
@@ -1081,43 +997,38 @@ async def calendar_cmd(u, c):
     await u.message.reply_text("\n".join(lines))
 
 
-# ---------------------------------------------------------------- [10] Khmer dictionary
-async def dict_cmd(u, c):
-    w = args_text(c)
-    if not w:
-        return await u.message.reply_text("ប្រើ៖ /dict <ពាក្យខ្មែរ>\nឧទាហរណ៍: /dict សួស្តី")
-    link = f"https://km.wiktionary.org/wiki/{url_quote(w)}"
-    try:
-        d = await get_json(f"https://km.wiktionary.org/api/rest_v1/page/summary/{url_quote(w)}")
-        ext = (d.get("extract") or "").strip()
-    except Exception:
-        ext = ""
-    if not ext:
-        return await u.message.reply_text(f"រកមិនឃើញពាក្យ \"{w}\" ក្នុងវចនានុក្រមទេ 📖\n🔗 {link}",
-                                          disable_web_page_preview=True)
-    if len(ext) > 800:
-        ext = ext[:800].rstrip() + "…"
-    await u.message.reply_text(f"📖 វចនានុក្រមខ្មែរ: {w}\n\n{ext}\n\n🔗 {link}", disable_web_page_preview=True)
-
-
-# ---------------------------------------------------------------- [11] song links
-async def song_cmd(u, c):
-    q = args_text(c)
-    if not q:
-        return await u.message.reply_text("ប្រើ៖ /song <ឈ្មោះចម្រៀង>\nឧទាហរណ៍: /song Hello Adele")
-    yt = "https://www.youtube.com/results?search_query=" + url_quote(q)
-    sp = "https://open.spotify.com/search/" + url_quote(q)
-    await u.message.reply_text(
-        f"🎵 {q}\n\n▶️ YouTube (ស្តាប់បទពេញ): {yt}\n🎧 Spotify: {sp}\n\n"
-        "⚠️ សំឡេងចាក់នៅក្នុង YouTube/Spotify ប៉ុណ្ណោះ ហើយអ្នកត្រូវចុចតំណដើម្បីស្តាប់។",
-        disable_web_page_preview=True)
+# ---------------------------------------------------------------- [12] Khmer food
+async def food_cmd(u, c):
+    raw = args_text(c)
+    if not raw:
+        lines = ["🍲 ម្ហូបខ្មែរ 50 មុខ",
+                 "វាយ /food <លេខ> ឬ /food <ឈ្មោះ> ឬ /food random", ""]
+        lines += [f"{i + 1}. {f['name']}" for i, f in enumerate(FOODS)]
+        return await u.message.reply_text("\n".join(lines))
+    if raw.lower() == "random":
+        f = random.choice(FOODS)
+    elif raw.isdigit() and 1 <= int(raw) <= len(FOODS):
+        f = FOODS[int(raw) - 1]
+    else:
+        match = [x for x in FOODS if raw in x["name"]]
+        if not match:
+            return await u.message.reply_text(f"រកមិនឃើញម្ហូប \"{raw}\" ទេ 🍲 វាយ /food ដើម្បីមើលបញ្ជី")
+        f = match[0]
+    text = (f"🍲 {f['name']}\n\n🧾 គ្រឿងផ្សំ:\n" + "\n".join(f"• {x}" for x in f["ingr"])
+            + "\n\n👩‍🍳 របៀបធ្វើ:\n" + "\n".join(f"{i}. {x}" for i, x in enumerate(f["steps"], 1)))
+    if f.get("img"):
+        try:
+            return await u.message.reply_photo(photo=f["img"], caption=text[:1024])
+        except Exception:
+            pass
+    await u.message.reply_text(text)
 
 
 HELP = """🤖 Koval Bot - បញ្ជី Command
 😄 ជជែក: /hello /joke /riddle /quote /roast /compliment /truth /dare /wouldyou /fact
-⚽ កីឡា: /fixtures\n📰 ព័ត៌មាន: /news /tech /sport /weather /exchange /gold /stock /crypto /today /holiday /trend
+⚽ កីឡា: /fixtures\n🍲 ម្ហូប: /food\n📰 ព័ត៌មាន: /news /tech /sport /weather /exchange /gold /stock /crypto /today /holiday /trend
 🎮 ល្បែង: /quiz /guess /dice /coin /rps /wordgame /math /story /poll /rank
-🛠 ឧបករណ៍: /song /dict /calendar /map /route /translate /define /calc /convert /remind /timer /time /summary /search /ask
+🛠 ឧបករណ៍: /calendar /translate /define /calc /convert /remind /timer /time /summary /search /ask
 👥 ក្រុម: /rules /welcome /birthday /admin /report /warn /mute /stats /daily /help"""
 
 
@@ -1188,7 +1099,7 @@ COMMANDS = {
     "rules": rules, "welcome": welcome, "birthday": birthday, "admin": admin_list, "report": report,
     "warn": warn, "mute": mute, "stats": stats, "daily": daily, "help": help_cmd, "start": help_cmd,
     "reveal": reveal,
-    "map": map_cmd, "route": route_cmd, "stock": stock, "fixtures": fixtures, "calendar": calendar_cmd, "dict": dict_cmd, "song": song_cmd,
+    "stock": stock, "fixtures": fixtures, "calendar": calendar_cmd, "food": food_cmd,
 }
 
 
