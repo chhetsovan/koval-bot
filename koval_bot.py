@@ -28,6 +28,7 @@ NO_DELETE = {"sendPoll"}   # មិនលុប poll ព្រោះលុបហ
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 AI_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip()
 AI_MODEL = os.getenv("AI_MODEL", "claude-sonnet-5-5")
+FINNHUB_KEY = os.getenv("FINNHUB_KEY", "").strip()
 TZ = ZoneInfo("Asia/Phnom_Penh")
 DATA_FILE = "koval_data.json"
 
@@ -940,19 +941,34 @@ async def route_cmd(u, c):
 
 
 # ---------------------------------------------------------------- [7] international stocks
-STOCKS = [("🚗 Tesla", "tsla.us"), ("🎮 NVIDIA", "nvda.us"), ("📘 Facebook (Meta)", "meta.us"),
-          ("🔍 Google", "googl.us"), ("🍎 Apple", "aapl.us"), ("🪟 Microsoft", "msft.us"),
-          ("📦 Amazon", "amzn.us"), ("🎬 Netflix", "nflx.us"), ("💻 Intel", "intc.us"),
-          ("🛢 ប្រេងឆៅ WTI", "cl.f")]
+STOCKS = [("🚗 Tesla", "TSLA"), ("🎮 NVIDIA", "NVDA"), ("📘 Facebook (Meta)", "META"),
+          ("🔍 Google", "GOOGL"), ("🍎 Apple", "AAPL"), ("🪟 Microsoft", "MSFT"),
+          ("📦 Amazon", "AMZN"), ("🎬 Netflix", "NFLX"), ("💻 Intel", "INTC"),
+          ("🛢 ប្រេងឆៅ WTI", "CL=F")]
 
 
-async def stooq_quote(sym):
-    text = await get_text(f"https://stooq.com/q/l/?s={sym}&f=sd2t2ohlcv&h&e=csv")
-    rows = list(csv.reader(io.StringIO(text.strip())))
-    if len(rows) < 2 or rows[1][3] in ("N/D", ""):
-        return None
-    o, cl = float(rows[1][3]), float(rows[1][6])
-    return cl, (cl - o) / o * 100
+async def yahoo_quote(sym):
+    d = await get_json(f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}",
+                       range="1d", interval="1d")
+    meta = d["chart"]["result"][0]["meta"]
+    price = float(meta["regularMarketPrice"])
+    prev = float(meta.get("chartPreviousClose") or meta.get("previousClose"))
+    return price, (price - prev) / prev * 100
+
+
+async def finnhub_quote(sym):
+    d = await get_json("https://finnhub.io/api/v1/quote", symbol=sym, token=FINNHUB_KEY)
+    if not d.get("c"):
+        raise ValueError("no price")
+    return float(d["c"]), float(d["dp"])
+
+
+async def quote_any(sym):
+    if sym == "CL=F":  # Finnhub free tier មិនមានប្រេង WTI
+        return await yahoo_quote(sym)
+    if not FINNHUB_KEY:
+        raise ValueError("FINNHUB_KEY missing")
+    return await finnhub_quote(sym)
 
 
 async def stock(u, c):
@@ -961,11 +977,11 @@ async def stock(u, c):
     if wanted:
         items = [x for x in STOCKS if wanted in x[1].lower() or wanted in x[0].lower()]
         if not items:
-            return await u.message.reply_text("ប្រើ /stock ឬ /stock tsla | nvda | meta | googl | aapl | msft | amzn | nflx | intc | cl.f")
+            return await u.message.reply_text("ប្រើ /stock ឬ /stock tsla | nvda | meta | googl | aapl | msft | amzn | nflx | intc | cl=f")
     lines = ["📈 តម្លៃភាគហ៊ុនអន្តរជាតិ (USD)", ""]
     for label, sym in items:
         try:
-            q = await stooq_quote(sym)
+            q = await quote_any(sym)
         except Exception:
             q = None
         if q is None:
@@ -974,13 +990,40 @@ async def stock(u, c):
         price, pct = q
         arrow = "🟢 ▲" if pct >= 0 else "🔴 ▼"
         lines.append(f"{label}: ${price:,.2f}  {arrow} {pct:+.2f}%")
-    lines.append("\n⚠️ តម្លៃអាចយឺតជាងការពិត ហើយ % គិតពីពេលបើកផ្សារ")
+    lines.append("\n⚠️ ភាគហ៊ុនពី Finnhub, ប្រេងពី Yahoo (ឥតគិតថ្លៃ) % គិតពីតម្លៃបិទម្សិលមិញ")
     await u.message.reply_text("\n".join(lines))
+
+
+# ---------------------------------------------------------------- [8] fixtures (3 days ahead)
+async def fixtures(u, c):
+    today = dt.datetime.now(TZ).date()
+    rng = f"{today:%Y%m%d}-{(today + dt.timedelta(days=3)):%Y%m%d}"
+    lines = ["📅 ការប្រកួតក្នុង ៣ ថ្ងៃខាងមុខ (ម៉ោងភ្នំពេញ)"]
+    for label, slug in ASIA_LEAGUES:
+        try:
+            d = await get_json(f"https://site.api.espn.com/apis/site/v2/sports/soccer/{slug}/scoreboard",
+                               dates=rng)
+            events = d.get("events", [])[:8]
+            lines.append(f"\n{label}")
+            if not events:
+                lines.append("  គ្មានការប្រកួត")
+            for ev in events:
+                comp = ev["competitions"][0]
+                a, b = comp["competitors"][0]["team"]["displayName"], comp["competitors"][1]["team"]["displayName"]
+                t = dt.datetime.fromisoformat(ev["date"].replace("Z", "+00:00")).astimezone(TZ)
+                lines.append(f"• {t:%d-%m %H:%M}  {a} vs {b}")
+        except Exception:
+            lines.append(f"\n{label}: មិនអាចទាញបាន")
+    lines += ["", "🔗 ព័ត៌មានបន្ថែម និងលទ្ធផលលម្អិត:",
+              "Soccerway: https://www.soccerway.com/",
+              "Thscore: https://www.thscore.com/",
+              "NowGoal: https://www.nowgoal.com/"]
+    await u.message.reply_text("\n".join(lines), disable_web_page_preview=True)
 
 
 HELP = """🤖 Koval Bot - បញ្ជី Command
 😄 ជជែក: /hello /joke /riddle /quote /roast /compliment /truth /dare /wouldyou /fact
-📰 ព័ត៌មាន: /news /tech /sport /weather /exchange /gold /stock /crypto /today /holiday /trend
+⚽ កីឡា: /fixtures\n📰 ព័ត៌មាន: /news /tech /sport /weather /exchange /gold /stock /crypto /today /holiday /trend
 🎮 ល្បែង: /quiz /guess /dice /coin /rps /wordgame /math /story /poll /rank
 🛠 ឧបករណ៍: /map /route /translate /define /calc /convert /remind /timer /time /summary /search /ask
 👥 ក្រុម: /rules /welcome /birthday /admin /report /warn /mute /stats /daily /help"""
@@ -1053,7 +1096,7 @@ COMMANDS = {
     "rules": rules, "welcome": welcome, "birthday": birthday, "admin": admin_list, "report": report,
     "warn": warn, "mute": mute, "stats": stats, "daily": daily, "help": help_cmd, "start": help_cmd,
     "reveal": reveal,
-    "map": map_cmd, "route": route_cmd, "stock": stock,
+    "map": map_cmd, "route": route_cmd, "stock": stock, "fixtures": fixtures,
 }
 
 
