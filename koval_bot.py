@@ -15,6 +15,7 @@ import operator
 import os
 import random
 import xml.etree.ElementTree as ET
+from urllib.parse import quote as url_quote
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -1021,11 +1022,102 @@ async def fixtures(u, c):
     await u.message.reply_text("\n".join(lines), disable_web_page_preview=True)
 
 
+# ---------------------------------------------------------------- [9] Khmer calendar
+KH_MONTHS = ["មករា", "កុម្ភៈ", "មីនា", "មេសា", "ឧសភា", "មិថុនា",
+             "កក្កដា", "សីហា", "កញ្ញា", "តុលា", "វិច្ឆិកា", "ធ្នូ"]
+KH_DAYS = ["ចន្ទ", "អង្គារ", "ពុធ", "ព្រហស្បតិ៍", "សុក្រ", "សៅរ៍", "អាទិត្យ"]
+KH_DIGITS = str.maketrans("0123456789", "០១២៣៤៥៦៧៨៩")
+
+
+def kh_num(n):
+    return str(n).translate(KH_DIGITS)
+
+
+def kh_date_text(d):
+    be = d.year + 543
+    return (f"ថ្ងៃ{KH_DAYS[d.weekday()]} ទី{kh_num(d.day)} ខែ{KH_MONTHS[d.month - 1]} "
+            f"ឆ្នាំ{kh_num(d.year)} (គ.ស.)\nព.ស. {kh_num(be)}")
+
+
+SYNODIC_DAYS = 29.530588853
+MOON_REF = dt.datetime(2000, 1, 6, 18, 14, tzinfo=dt.timezone.utc)  # ថ្ងៃព្រះចន្ទថ្មីយោង
+
+
+def lunar_text(when):
+    """ប្រហាក់ប្រហែល: គណនាពីអាយុព្រះចន្ទ (ខុសបានប្រហែល ១ ថ្ងៃពីប្រតិទិនផ្លូវការ)"""
+    age = ((when - MOON_REF).total_seconds() / 86400) % SYNODIC_DAYS
+    day = int(age) + 1
+    if day <= 15:
+        label = f"{kh_num(day)} កើត"
+        if day == 15:
+            label += " (ថ្ងៃពេញបូណ៌មី)"
+    else:
+        label = f"{kh_num(day - 15)} រោច"
+        if day == 30:
+            label += " (ថ្ងៃអមាវាស្យា)"
+    return label
+
+
+async def calendar_cmd(u, c):
+    raw = args_text(c).replace("/", "-")
+    if raw:
+        try:
+            d = dt.datetime.strptime(raw, "%d-%m-%Y").date()
+        except ValueError:
+            return await u.message.reply_text("ប្រើ៖ /calendar ឬ /calendar ថ្ងៃ-ខែ-ឆ្នាំ\nឧ. /calendar 15-04-2027")
+    else:
+        d = dt.datetime.now(TZ).date()
+    moon = lunar_text(dt.datetime.combine(d, dt.time(12), TZ).astimezone(dt.timezone.utc))
+    lines = ["🗓 ប្រតិទិនខ្មែរ (គ្រិស្តសករាជ & ពុទ្ធសករាជ)", "", kh_date_text(d),
+             f"🌙 ចន្ទគតិ (ប្រហាក់ប្រហែល): {moon}"]
+    nxt = dt.date(d.year, 4, 13)
+    if nxt < d:
+        nxt = dt.date(d.year + 1, 4, 13)
+    left = (nxt - d).days
+    lines.append("")
+    lines.append("🎊 ថ្ងៃចូលឆ្នាំខ្មែរ!" if left == 0 else
+                 f"🎊 នៅសល់ {kh_num(left)} ថ្ងៃទៀតដល់ថ្ងៃចូលឆ្នាំខ្មែរ (១៣ មេសា)")
+    lines.append("\n⚠️ ចន្ទគតិគណនាតាមវដ្តព្រះចន្ទ អាចខុសពីប្រតិទិនផ្លូវការ ១ ថ្ងៃ")
+    await u.message.reply_text("\n".join(lines))
+
+
+# ---------------------------------------------------------------- [10] Khmer dictionary
+async def dict_cmd(u, c):
+    w = args_text(c)
+    if not w:
+        return await u.message.reply_text("ប្រើ៖ /dict <ពាក្យខ្មែរ>\nឧទាហរណ៍: /dict សួស្តី")
+    link = f"https://km.wiktionary.org/wiki/{url_quote(w)}"
+    try:
+        d = await get_json(f"https://km.wiktionary.org/api/rest_v1/page/summary/{url_quote(w)}")
+        ext = (d.get("extract") or "").strip()
+    except Exception:
+        ext = ""
+    if not ext:
+        return await u.message.reply_text(f"រកមិនឃើញពាក្យ \"{w}\" ក្នុងវចនានុក្រមទេ 📖\n🔗 {link}",
+                                          disable_web_page_preview=True)
+    if len(ext) > 800:
+        ext = ext[:800].rstrip() + "…"
+    await u.message.reply_text(f"📖 វចនានុក្រមខ្មែរ: {w}\n\n{ext}\n\n🔗 {link}", disable_web_page_preview=True)
+
+
+# ---------------------------------------------------------------- [11] song links
+async def song_cmd(u, c):
+    q = args_text(c)
+    if not q:
+        return await u.message.reply_text("ប្រើ៖ /song <ឈ្មោះចម្រៀង>\nឧទាហរណ៍: /song Hello Adele")
+    yt = "https://www.youtube.com/results?search_query=" + url_quote(q)
+    sp = "https://open.spotify.com/search/" + url_quote(q)
+    await u.message.reply_text(
+        f"🎵 {q}\n\n▶️ YouTube (ស្តាប់បទពេញ): {yt}\n🎧 Spotify: {sp}\n\n"
+        "⚠️ សំឡេងចាក់នៅក្នុង YouTube/Spotify ប៉ុណ្ណោះ ហើយអ្នកត្រូវចុចតំណដើម្បីស្តាប់។",
+        disable_web_page_preview=True)
+
+
 HELP = """🤖 Koval Bot - បញ្ជី Command
 😄 ជជែក: /hello /joke /riddle /quote /roast /compliment /truth /dare /wouldyou /fact
 ⚽ កីឡា: /fixtures\n📰 ព័ត៌មាន: /news /tech /sport /weather /exchange /gold /stock /crypto /today /holiday /trend
 🎮 ល្បែង: /quiz /guess /dice /coin /rps /wordgame /math /story /poll /rank
-🛠 ឧបករណ៍: /map /route /translate /define /calc /convert /remind /timer /time /summary /search /ask
+🛠 ឧបករណ៍: /song /dict /calendar /map /route /translate /define /calc /convert /remind /timer /time /summary /search /ask
 👥 ក្រុម: /rules /welcome /birthday /admin /report /warn /mute /stats /daily /help"""
 
 
@@ -1096,7 +1188,7 @@ COMMANDS = {
     "rules": rules, "welcome": welcome, "birthday": birthday, "admin": admin_list, "report": report,
     "warn": warn, "mute": mute, "stats": stats, "daily": daily, "help": help_cmd, "start": help_cmd,
     "reveal": reveal,
-    "map": map_cmd, "route": route_cmd, "stock": stock, "fixtures": fixtures,
+    "map": map_cmd, "route": route_cmd, "stock": stock, "fixtures": fixtures, "calendar": calendar_cmd, "dict": dict_cmd, "song": song_cmd,
 }
 
 
