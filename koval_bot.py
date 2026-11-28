@@ -1024,19 +1024,6 @@ async def food_cmd(u, c):
     await u.message.reply_text(text)
 
 
-# ---------------------------------------------------------------- [13] Cambodia stock (CSX)
-KH_STOCKS = [("PWSA", "ផ្គត់ផ្គង់ទឹកភ្នំពេញ"), ("PEPC", "ប៉េស្តេក (កម្ពុជា)"),
-             ("GTI", "ក្រុមហ៊ុនហ្គ្រេនត៍ធ្វីនស៍ (កម្ពុជា)"), ("PPAP", "កំពង់ផែស្វយ័តភ្នំពេញ")]
-
-
-async def khstock(u, c):
-    lines = ["🇰🇭 ភាគហ៊ុនដែលចុះផ្សារ CSX (កម្ពុជា)", ""]
-    lines += [f"• {tk} — {name}" for tk, name in KH_STOCKS]
-    lines += ["", "📊 តម្លៃផ្លូវការ: https://www.csx.com.kh",
-              "⚠️ បញ្ជីអាចមិនពេញលេញ ហើយ bot មិនទាញតម្លៃស្វ័យប្រវត្តិ"]
-    await u.message.reply_text("\n".join(lines), disable_web_page_preview=True)
-
-
 # ---------------------------------------------------------------- [14] health
 HEALTH_NOTE = "⚠️ ព័ត៌មានទូទៅ មិនជំនួសការពិគ្រោះវេជ្ជបណ្ឌិតទេ"
 EXERCISE_TIPS = [
@@ -1110,7 +1097,7 @@ async def bmr(u, c):
 
 HELP = """🤖 Koval Bot - បញ្ជី Command
 😄 ជជែក: /hello /joke /riddle /quote /roast /compliment /truth /dare /wouldyou /fact
-⚽ កីឡា: /fixtures\n🍲 ម្ហូប: /food\n🇰🇭 ផ្សារហ៊ុនខ្មែរ: /khstock\n🩺 សុខភាព: /health /exercise /diet /bmr\n📰 ព័ត៌មាន: /news /tech /sport /weather /exchange /gold /stock /crypto /today /holiday /trend
+⚽ កីឡា: /fixtures\n🍲 ម្ហូប: /food\n🩺 សុខភាព: /health /exercise /diet /bmr\n📰 ព័ត៌មាន: /news /tech /sport /weather /exchange /gold /stock /crypto /today /holiday /trend
 🎮 ល្បែង: /quiz /guess /dice /coin /rps /wordgame /math /story /poll /rank
 🛠 ឧបករណ៍: /calendar /translate /define /calc /convert /remind /timer /time /summary /search /ask
 👥 ក្រុម: /rules /welcome /birthday /admin /report /warn /mute /stats /daily /help"""
@@ -1183,7 +1170,7 @@ COMMANDS = {
     "rules": rules, "welcome": welcome, "birthday": birthday, "admin": admin_list, "report": report,
     "warn": warn, "mute": mute, "stats": stats, "daily": daily, "help": help_cmd, "start": help_cmd,
     "reveal": reveal,
-    "stock": stock, "fixtures": fixtures, "calendar": calendar_cmd, "food": food_cmd, "khstock": khstock, "health": health_menu, "exercise": exercise, "diet": diet, "bmr": bmr,
+    "stock": stock, "fixtures": fixtures, "calendar": calendar_cmd, "food": food_cmd, "health": health_menu, "exercise": exercise, "diet": diet, "bmr": bmr,
 }
 
 
