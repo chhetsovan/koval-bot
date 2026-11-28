@@ -14,6 +14,7 @@ import operator
 import os
 import random
 import xml.etree.ElementTree as ET
+from urllib.parse import quote as url_quote
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -211,7 +212,8 @@ async def riddle(u, c):
 async def send_feed(u, title, url, n=5):
     try:
         items = await rss(url, n)
-        await u.message.reply_text(title + "\n\n" + "\n\n".join(f"• {t}\n{l}" for t, l in items),
+        titles = await asyncio.gather(*[to_km(t) for t, _ in items])
+        await u.message.reply_text(title + "\n\n" + "\n\n".join(f"• {tt}\n{l}" for tt, (_, l) in zip(titles, items)),
                                    disable_web_page_preview=True)
     except Exception:
         await u.message.reply_text("មិនអាចទាញព័ត៌មានបានទេ 😢")
@@ -248,42 +250,8 @@ async def news(u, c):
         pass
     await u.message.reply_text("\n".join(lines), disable_web_page_preview=True)
 async def tech(u, c): await send_feed(u, "💻 បច្ចេកវិទ្យា", "https://feeds.bbci.co.uk/news/technology/rss.xml")
-ASIA_LEAGUES = [("🏆 AFC Champions League", "afc.champions"),
-                ("🇹🇭 ថៃ (Thai League 1)", "tha.1"),
-                ("🇻🇳 វៀតណាម (V.League 1)", "vnm.1")]
-
-
-async def league_today(slug):
-    d = await get_json(f"https://site.api.espn.com/apis/site/v2/sports/soccer/{slug}/scoreboard")
-    rows = []
-    for ev in d.get("events", [])[:8]:
-        comp = ev["competitions"][0]
-        a, b = comp["competitors"][0], comp["competitors"][1]
-        score = f"{a.get('score', '-')} - {b.get('score', '-')}"
-        status = ev["status"]["type"]["shortDetail"]
-        rows.append(f"• {a['team']['displayName']} {score} {b['team']['displayName']} ({status})")
-    return rows
-
-
 async def sport(u, c):
-    lines = ["⚽ កីឡា", "", "🌏 ការប្រកួតនៅអាស៊ីថ្ងៃនេះ"]
-    for label, slug in ASIA_LEAGUES:
-        try:
-            rows = await league_today(slug)
-            lines.append(f"\n{label}")
-            lines += rows or ["  គ្មានការប្រកួតថ្ងៃនេះ"]
-        except Exception:
-            lines.append(f"\n{label}: មិនអាចទាញបាន")
-    try:
-        items = await rss("https://feeds.bbci.co.uk/sport/rss.xml", 3)
-        titles = await asyncio.gather(*[to_km(t) for t, _ in items])
-        lines.append("\n📰 ព័ត៌មានកីឡាពិភពលោក")
-        lines += [f"• {tt}\n{l}" for tt, (_, l) in zip(titles, items)]
-    except Exception:
-        pass
-    await u.message.reply_text("\n".join(lines), disable_web_page_preview=True)
-
-
+    await send_feed(u, "⚽ ព័ត៌មានកីឡា", "https://feeds.bbci.co.uk/sport/rss.xml")
 
 
 WAIT_LOC = {}  # ពេលដែលបានស្នើទីតាំង
@@ -392,13 +360,31 @@ async def gold(u, c):
     await u.message.reply_text("\n".join(out))
 
 
+CRYPTO_INFO = {
+    "bitcoin": ("Bitcoin (BTC)", "រូបិយប័ណ្ណឌីជីថលដំបូងបំផុត ច្រើនប្រើជាទុនរក្សាតម្លៃ"),
+    "ethereum": ("Ethereum (ETH)", "វេទិកាសម្រាប់កម្មវិធី និងកិច្ចសន្យាស្វ័យប្រវត្តិ (smart contract)"),
+    "binancecoin": ("BNB", "Token របស់ Binance ប្រើកាត់ថ្លៃប្រតិបត្តិការ"),
+    "solana": ("Solana (SOL)", "blockchain លឿន ថ្លៃទាប សម្រាប់កម្មវិធី និង NFT"),
+    "ripple": ("XRP", "ប្រើសម្រាប់ផ្ទេរប្រាក់ឆ្លងដែនឱ្យលឿន"),
+}
+
+
 async def crypto(u, c):
     try:
-        ids = "bitcoin,ethereum,binancecoin,solana,ripple"
-        d = await get_json("https://api.coingecko.com/api/v3/simple/price", ids=ids,
-                           vs_currencies="usd", include_24hr_change="true")
-        lines = [f"{k.title()}: ${v['usd']:,.2f} ({v['usd_24h_change']:+.1f}%)" for k, v in d.items()]
-        await u.message.reply_text("🪙 Crypto\n" + "\n".join(lines))
+        d = await get_json("https://api.coingecko.com/api/v3/simple/price",
+                           ids=",".join(CRYPTO_INFO), vs_currencies="usd", include_24hr_change="true")
+        lines = ["🪙 តម្លៃ Crypto (USD)", ""]
+        for key, (name, desc) in CRYPTO_INFO.items():
+            if key not in d:
+                lines.append(f"• {name}: មិនអាចទាញបាន")
+                continue
+            v = d[key]
+            chg = v.get("usd_24h_change", 0) or 0
+            arrow = "🟢 ▲" if chg >= 0 else "🔴 ▼"
+            lines.append(f"• {name}: ${v['usd']:,.2f}  {arrow} {chg:+.1f}% (24ម៉ោង)")
+            lines.append(f"  ℹ️ {desc}")
+        lines += ["", "⚠️ Crypto មានហានិភ័យខ្ពស់ ខ្ញុំមិនមែនជាការណែនាំវិនិយោគទេ"]
+        await u.message.reply_text("\n".join(lines))
     except Exception:
         await u.message.reply_text("មិនអាចទាញតម្លៃ Crypto បានទេ 😢")
 
@@ -408,7 +394,8 @@ async def today(u, c):
         n = dt.datetime.now(TZ)
         d = await get_json(f"https://en.wikipedia.org/api/rest_v1/feed/onthisday/events/{n.month:02d}/{n.day:02d}")
         e = random.choice(d["events"])
-        await u.message.reply_text(f"📜 ថ្ងៃនេះក្នុងប្រវត្តិសាស្ត្រ\n{e['year']}: {e['text']}")
+        txt = await to_km(e["text"])
+        await u.message.reply_text(f"📜 ថ្ងៃនេះក្នុងប្រវត្តិសាស្ត្រ\n{e['year']}: {txt}")
     except Exception:
         await u.message.reply_text("មិនអាចទាញប្រវត្តិសាស្ត្របានទេ 😢")
 
@@ -427,7 +414,8 @@ async def trend(u, c):
                            f"all-access/{y.year}/{y.month:02d}/{y.day:02d}")
         arts = [a["article"].replace("_", " ") for a in d["items"][0]["articles"]
                 if not a["article"].startswith(("Main_Page", "Special:", "Wikipedia:"))][:7]
-        await u.message.reply_text("🔥 កំពុងពេញនិយម (Wikipedia)\n" + "\n".join(f"{i+1}. {a}" for i, a in enumerate(arts)))
+        titles = await asyncio.gather(*[to_km(a) for a in arts])
+        await u.message.reply_text("🔥 កំពុងពេញនិយម (Wikipedia)\n" + "\n".join(f"{i+1}. {t}" for i, t in enumerate(titles)))
     except Exception:
         await u.message.reply_text("មិនអាចទាញប្រធានបទពេញនិយមបានទេ 😢")
 
@@ -698,24 +686,32 @@ async def summary(u, c):
 async def search(u, c):
     q = args_text(c)
     if not q:
-        return await u.message.reply_text("ប្រើ /search <ពាក្យ>")
+        return await u.message.reply_text("ប្រើ៖ /search <ពាក្យ>\nឧទាហរណ៍: /search អង្គរវត្ត")
+    lines = [f"🔎 ស្វែងរក: {q}", "",
+             f"🌐 Google: https://www.google.com/search?q={url_quote(q)}",
+             f"📚 Wikipedia ខ្មែរ: https://km.wikipedia.org/w/index.php?search={url_quote(q)}"]
     try:
         d = await get_json("https://en.wikipedia.org/w/api.php", action="query", list="search",
                            srsearch=q, format="json", srlimit=3)
-        out = [f"• {r['title']}\nhttps://en.wikipedia.org/wiki/{r['title'].replace(' ', '_')}"
+        out = [f"• {r['title']}: https://en.wikipedia.org/wiki/{url_quote(r['title'].replace(' ', '_'))}"
                for r in d["query"]["search"]]
-        await u.message.reply_text("🔎 លទ្ធផល\n" + ("\n".join(out) or "រកមិនឃើញ"), disable_web_page_preview=True)
+        if out:
+            lines += ["", "📚 Wikipedia អង់គ្លេស:"] + out
     except Exception:
-        await u.message.reply_text("ស្វែងរកមិនបានទេ 😢")
+        pass
+    await u.message.reply_text("\n".join(lines), disable_web_page_preview=True)
 
 
 async def ask(u, c):
     q = args_text(c) or (u.message.reply_to_message.text if u.message.reply_to_message else "")
+    g = "https://www.google.com/search?q=" + url_quote(q or "")
     if not q:
-        return await u.message.reply_text("ប្រើ /ask <សំណួរ>")
+        return await u.message.reply_text(f"ប្រើ៖ /ask <សំណួរ>\n🌐 ស្វែងរកក្នុង Google: https://www.google.com",
+                                          disable_web_page_preview=True)
     await u.effective_chat.send_action("typing")
     r = await ai(q)
-    await u.message.reply_text(r or "🤖 ត្រូវការ ANTHROPIC_API_KEY ដើម្បីប្រើ /ask")
+    body = r or "🤖 មិនមានការតភ្ជាប់ AI ទេ សូមប្រើតំណ Google ខាងក្រោម។"
+    await u.message.reply_text(f"💬 {body}\n\n🌐 ស្វែងរកបន្ថែមក្នុង Google: {g}", disable_web_page_preview=True)
 
 
 # ---------------------------------------------------------------- [5] group mgmt
@@ -738,6 +734,11 @@ async def welcome(u, c):
 
 
 async def on_new_member(u, c):
+    if any(m.id == c.bot.id for m in u.message.new_chat_members):
+        cid = str(u.effective_chat.id)
+        DATA["daily"][cid] = True
+        DATA.get("daily_off", {}).pop(cid, None)
+        save()
     t = DATA["welcome"].get(str(u.effective_chat.id), "សូមស្វាគមន៍ {name} មកកាន់ក្រុម! 🎉 វាយ /rules មើលច្បាប់")
     for m in u.message.new_chat_members:
         if not m.is_bot:
@@ -819,14 +820,32 @@ async def stats(u, c):
                                "\n".join(f"{i+1}. {x['name']}: {x['n']}" for i, x in enumerate(top)))
 
 
+GREETINGS = ["☀️ សួស្តីពេលព្រឹកមិត្តទាំងអស់!", "🌤 អរុណសួស្តីមិត្តៗក្នុងក្រុម!",
+             "🌞 សួស្តីពេលព្រឹកដ៏ស្រស់ស្អាត!", "🌅 អរុណសួស្តីសមាជិកទាំងអស់!",
+             "🌻 សួស្តីពេលព្រឹកមិត្តល្អៗ!", "🐓 ព្រឹកនេះស្រស់ស្អាតណាស់ សួស្តីមិត្តទាំងអស់!",
+             "🌈 អរុណសួស្តីដល់គ្រប់គ្នា!"]
+BLESSINGS = ["ជូនពរឱ្យមានសុខភាពល្អ សុភមង្គល និងជោគជ័យគ្រប់ការងារ 🙏",
+             "ជូនពរឱ្យមានថ្ងៃដ៏ល្អ និងចិត្តស្រស់ថ្លា 💫",
+             "ជូនពរឱ្យរាល់ការងារទទួលបានជោគជ័យ 🌟",
+             "ជូនពរឱ្យគ្រួសារ និងមិត្តភក្តិមានសុខភាពល្អ ❤️",
+             "ជូនពរឱ្យមានប្រាក់ចំណូលល្អ និងសេចក្តីសុខ 🍀",
+             "ជូនពរឱ្យមានថ្ងៃដ៏សប្បាយ និងសុខសាន្ត ☀️",
+             "ជូនពរឱ្យរាល់ហេតុការណ៍ប្រែទៅជាល្អ 🌸"]
+
+
 async def build_daily(chat_id):
-    parts = ["☀️ អរុណសួស្តី! សេចក្តីសង្ខេបប្រចាំថ្ងៃ\n", "💬 " + random.choice(QUOTES)]
+    doy = dt.datetime.now(TZ).timetuple().tm_yday
+    g = GREETINGS[doy % len(GREETINGS)]
+    b = BLESSINGS[doy % len(BLESSINGS)]
+    parts = [g, "សូមស្វាគមន៍សមាជិកទាំងអស់ 🎉 " + b, "", "💬 " + random.choice(QUOTES)]
     try:
         parts.append("\n" + await weather_text())
     except Exception:
         pass
     try:
-        parts.append("\n📰 ព័ត៌មាន\n" + "\n".join(f"• {t}" for t, _ in await rss("https://feeds.bbci.co.uk/news/world/rss.xml", 3)))
+        items = await rss("https://feeds.bbci.co.uk/news/world/rss.xml", 3)
+        titles = await asyncio.gather(*[to_km(t) for t, _ in items])
+        parts.append("\n📰 ព័ត៌មាន\n" + "\n".join(f"• {t}" for t in titles))
     except Exception:
         pass
     today_s = dt.datetime.now(TZ).strftime("%d-%m")
@@ -848,12 +867,15 @@ async def daily(u, c):
     cid = str(u.effective_chat.id)
     a = args_text(c).lower()
     if a in ("on", "off") and await is_admin(u, c):
+        off = DATA.setdefault("daily_off", {})
         if a == "on":
             DATA["daily"][cid] = True
+            off.pop(cid, None)
         else:
             DATA["daily"].pop(cid, None)
+            off[cid] = True
         save()
-        return await u.message.reply_text(f"✅ សេចក្តីសង្ខេបម៉ោង ៨ ព្រឹក: {a.upper()}")
+        return await u.message.reply_text(f"✅ សេចក្តីសង្ខេបម៉ោង ៧ ព្រឹក: {a.upper()}")
     await u.message.reply_text(await build_daily(cid))
 
 
@@ -913,29 +935,12 @@ async def stock(u, c):
 
 # ---------------------------------------------------------------- [8] fixtures (3 days ahead)
 async def fixtures(u, c):
-    today = dt.datetime.now(TZ).date()
-    rng = f"{today:%Y%m%d}-{(today + dt.timedelta(days=3)):%Y%m%d}"
-    lines = ["📅 ការប្រកួតក្នុង ៣ ថ្ងៃខាងមុខ (ម៉ោងភ្នំពេញ)"]
-    for label, slug in ASIA_LEAGUES:
-        try:
-            d = await get_json(f"https://site.api.espn.com/apis/site/v2/sports/soccer/{slug}/scoreboard",
-                               dates=rng)
-            events = d.get("events", [])[:8]
-            lines.append(f"\n{label}")
-            if not events:
-                lines.append("  គ្មានការប្រកួត")
-            for ev in events:
-                comp = ev["competitions"][0]
-                a, b = comp["competitors"][0]["team"]["displayName"], comp["competitors"][1]["team"]["displayName"]
-                t = dt.datetime.fromisoformat(ev["date"].replace("Z", "+00:00")).astimezone(TZ)
-                lines.append(f"• {t:%d-%m %H:%M}  {a} vs {b}")
-        except Exception:
-            lines.append(f"\n{label}: មិនអាចទាញបាន")
-    lines += ["", "🔗 ព័ត៌មានបន្ថែម និងលទ្ធផលលម្អិត:",
-              "Soccerway: https://www.soccerway.com/",
-              "Thscore: https://www.thscore.com/",
-              "NowGoal: https://www.nowgoal.com/"]
-    await u.message.reply_text("\n".join(lines), disable_web_page_preview=True)
+    await u.message.reply_text(
+        "⚽ ការប្រកួត និងលទ្ធផលកីឡា\n\n"
+        "🔗 Soccerway: https://www.soccerway.com/\n"
+        "🔗 Thscore: https://www.thscore.com/\n"
+        "🔗 NowGoal: https://www.nowgoal.com/",
+        disable_web_page_preview=True)
 
 
 # ---------------------------------------------------------------- [9] Khmer calendar
@@ -1095,11 +1100,60 @@ async def bmr(u, c):
         "(គណនាតាមរូបមន្ត Mifflin-St Jeor)\n\n" + HEALTH_NOTE)
 
 
+FOREX_GLOSSARY = [
+    ("cpi", "CPI (ដัชនីតម្លៃអ្នកប្រើប្រាស់): វាស់អតិផរណា។ ខ្ពស់ជាងការព្យាករណ៍ ជាធម្មតាធ្វើឱ្យរូបិយប័ណ្ណនោះកាន់តែរឹង"),
+    ("nonfarm", "NFP (ការងារក្រៅវិស័យកសិកម្ម): វាស់ការងារថ្មីរបស់សហរដ្ឋអាមេរិក ផលប៉ះពាល់ខ្ពស់ទៅលើទីផ្សារ"),
+    ("interest rate", "ការសម្រេចអត្រាការប្រាក់: ធនាគារកណ្តាលកំណត់ថ្លៃខ្ចីប្រាក់ ដែលប៉ះពាល់ដល់រូបិយប័ណ្ណ និងទីផ្សារ"),
+    ("fomc", "FOMC: គណៈកម្មការទីផ្សារបើកចំហនៃធនាគារកណ្តាលអាមេរិក ដែលសម្រេចអត្រាការប្រាក់"),
+    ("gdp", "GDP (ផលិតផលក្នុងស្រុកសរុប): វាស់កំណើនសេដ្ឋកិច្ច ខ្ពស់ជាង ឬទាបជាងការព្យាករណ៍ មានផលប៉ះពាល់"),
+    ("pmi", "PMI: ការស្ទង់មតិវិស័យផលិតកម្ម ឬសេវា។ លើ 50 មានន័យថាសេដ្ឋកិច្ចកំពុងពង្រីក"),
+    ("unemployment", "អត្រាអត់ការងារ: ភាគរយនៃអ្នកដែលស្វែងរកការងារ។ ទាបជាងការព្យាករណ៍ ជាទូទៅវិជ្ជមានចំពោះរូបិយប័ណ្ណ"),
+]
+FOREX_IMPACT = {"High": "🔴 ខ្ពស់", "Medium": "🟠 មធ្យម", "Low": "🟢 ទាប", "Holiday": "⚪ ថ្ងៃឈប់សម្រាក"}
+
+
+async def forex_cmd(u, c):
+    try:
+        events = await get_json("https://nfs.faireconomy.media/ff_calendar_thisweek.json")
+    except Exception:
+        return await u.message.reply_text("មិនអាចទាញទិន្នន័យ Forex Factory បានទេ 😢")
+    now = dt.datetime.now(dt.timezone.utc)
+    rows = []
+    for e in events:
+        if e.get("impact") != "High":
+            continue
+        try:
+            t = dt.datetime.fromisoformat(e["date"])
+        except Exception:
+            continue
+        if now - dt.timedelta(hours=1) <= t <= now + dt.timedelta(days=3):
+            rows.append((t, e))
+    rows.sort(key=lambda x: x[0])
+    lines = ["💹 ព្រឹត្តិការណ៍ Forex ផលប៉ះពាល់ខ្ពស់", "(៣ ថ្ងៃខាងមុខ ម៉ោងភ្នំពេញ)", ""]
+    if not rows:
+        lines.append("គ្មានព្រឹត្តិការណ៍ផលប៉ះពាល់ខ្ពស់ក្នុង ៣ ថ្ងៃខាងមុខទេ")
+    glossary = set()
+    for t, e in rows[:10]:
+        title = e.get("title", "")
+        local = t.astimezone(TZ)
+        lines.append(f"• {local:%d-%m %H:%M} | {e.get('country', '')} | {FOREX_IMPACT.get(e.get('impact'), '')}")
+        lines.append(f"  {title}")
+        lines.append(f"  ការព្យាករណ៍: {e.get('forecast') or '-'} | តួលេខមុន: {e.get('previous') or '-'}")
+        for kw, txt in FOREX_GLOSSARY:
+            if kw in title.lower():
+                glossary.add(txt)
+    if glossary:
+        lines += ["", "📘 ការពន្យល់:"] + [f"• {g}" for g in sorted(glossary)]
+    lines += ["", "ℹ️ ការព្យាករណ៍ និងតួលេខមុនជាការប៉ាន់ស្មាន លទ្ធផលពិតអាចខុសពីនេះ",
+              "🔗 https://www.forexfactory.com/calendar"]
+    await u.message.reply_text("\n".join(lines), disable_web_page_preview=True)
+
+
 HELP = """🤖 Koval Bot - បញ្ជី Command
 😄 ជជែក: /hello /joke /riddle /quote /roast /compliment /truth /dare /wouldyou /fact
 ⚽ កីឡា: /fixtures\n🍲 ម្ហូប: /food\n🩺 សុខភាព: /health /exercise /diet /bmr\n📰 ព័ត៌មាន: /news /tech /sport /weather /exchange /gold /stock /crypto /today /holiday /trend
 🎮 ល្បែង: /quiz /guess /dice /coin /rps /wordgame /math /story /poll /rank
-🛠 ឧបករណ៍: /calendar /translate /define /calc /convert /remind /timer /time /summary /search /ask
+💹 Forex: /forex\n🛠 ឧបករណ៍: /calendar /translate /define /calc /convert /remind /timer /time /summary /search /ask
 👥 ក្រុម: /rules /welcome /birthday /admin /report /warn /mute /stats /daily /help"""
 
 
@@ -1112,6 +1166,10 @@ async def on_text(u: Update, c: ContextTypes.DEFAULT_TYPE):
     if not m or not m.text:
         return
     cid, usr = str(u.effective_chat.id), u.effective_user
+    if u.effective_chat.type in ("group", "supergroup"):
+        if cid not in DATA["daily"] and cid not in DATA.get("daily_off", {}):
+            DATA["daily"][cid] = True
+            save()
     st = DATA["stats"].setdefault(cid, {}).setdefault(str(usr.id), {"name": usr.first_name, "n": 0})
     st["n"] += 1
     st["name"] = usr.first_name
@@ -1170,7 +1228,7 @@ COMMANDS = {
     "rules": rules, "welcome": welcome, "birthday": birthday, "admin": admin_list, "report": report,
     "warn": warn, "mute": mute, "stats": stats, "daily": daily, "help": help_cmd, "start": help_cmd,
     "reveal": reveal,
-    "stock": stock, "fixtures": fixtures, "calendar": calendar_cmd, "food": food_cmd, "health": health_menu, "exercise": exercise, "diet": diet, "bmr": bmr,
+    "stock": stock, "fixtures": fixtures, "calendar": calendar_cmd, "food": food_cmd, "forex": forex_cmd, "health": health_menu, "exercise": exercise, "diet": diet, "bmr": bmr,
 }
 
 
@@ -1188,7 +1246,7 @@ def main():
     app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, on_new_member))
     app.add_handler(MessageHandler(filters.LOCATION, on_location))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
-    app.job_queue.run_daily(daily_job, dt.time(8, 0, tzinfo=TZ))
+    app.job_queue.run_daily(daily_job, dt.time(7, 0, tzinfo=TZ))
     print("Koval bot is running...")
     app.run_polling()
 
