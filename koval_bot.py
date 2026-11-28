@@ -286,7 +286,7 @@ async def sport(u, c):
 
 
 
-WAIT_LOC = {}  # (chat_id, user_id) -> เวลาที่ขอตำแหน่ง
+WAIT_LOC = {}  # ពេលដែលបានស្នើទីតាំង
 
 
 async def weather_at(lat, lon, name="ទីតាំងរបស់អ្នក"):
@@ -1024,9 +1024,93 @@ async def food_cmd(u, c):
     await u.message.reply_text(text)
 
 
+# ---------------------------------------------------------------- [13] Cambodia stock (CSX)
+KH_STOCKS = [("PWSA", "ផ្គត់ផ្គង់ទឹកភ្នំពេញ"), ("PEPC", "ប៉េស្តេក (កម្ពុជា)"),
+             ("GTI", "ក្រុមហ៊ុនហ្គ្រេនត៍ធ្វីនស៍ (កម្ពុជា)"), ("PPAP", "កំពង់ផែស្វយ័តភ្នំពេញ")]
+
+
+async def khstock(u, c):
+    lines = ["🇰🇭 ភាគហ៊ុនដែលចុះផ្សារ CSX (កម្ពុជា)", ""]
+    lines += [f"• {tk} — {name}" for tk, name in KH_STOCKS]
+    lines += ["", "📊 តម្លៃផ្លូវការ: https://www.csx.com.kh",
+              "⚠️ បញ្ជីអាចមិនពេញលេញ ហើយ bot មិនទាញតម្លៃស្វ័យប្រវត្តិ"]
+    await u.message.reply_text("\n".join(lines), disable_web_page_preview=True)
+
+
+# ---------------------------------------------------------------- [14] health
+HEALTH_NOTE = "⚠️ ព័ត៌មានទូទៅ មិនជំនួសការពិគ្រោះវេជ្ជបណ្ឌិតទេ"
+EXERCISE_TIPS = [
+    "🚶 ដើរលឿន 30 នាទី រាល់ថ្ងៃ ជួយបេះដូង និងសម្ពាធឈាម",
+    "🧘 លាតសន្ធឹងសាច់ដុំ 5–10 នាទី មុន និងក្រោយការហាត់",
+    "🏋️ ហាត់ទម្ងន់ខ្លួនឯង (Push-up, Squat) 2–3 ដងក្នុងមួយសប្តាហ៍",
+    "🚴 ជិះកង់ ឬហែលទឹក ជាកីឡាដែលស្រាលសម្រាប់សន្លាក់",
+    "😴 គេងឱ្យបាន 7–8 ម៉ោងក្នុងមួយយប់ ជួយការងើបសាច់ដុំ",
+    "💧 ផឹកទឹកឱ្យគ្រប់គ្រាន់ ជាពិសេសពេលហាត់",
+    "📈 បង្កើនកម្រិតហាត់បន្តិចម្តងៗ កុំធ្វើច្រើនពេកភ្លាមៗ",
+    "🤸 ហាត់ភាពបត់បែន (Yoga, លាតសន្ធឹង) ជាប្រចាំ",
+]
+DIET_TIPS = [
+    "🥬 បរិភោគបន្លែ និងផ្លែឈើជាច្រើនប្រភេទ រាល់ថ្ងៃ",
+    "🐟 ជ្រើសប្រភពប្រូតេអ៊ីនដូចជាត្រី ស៊ុត សណ្តែក ជាជាងសាច់ក្រហម",
+    "🍚 ជ្រើសអង្ករត្រកូលបំពេញ (ឬអង្ករ/ធញ្ញជាតិពេញ) ជំនួសអង្ករសធ្លាយ",
+    "🥛 ជ្រើសទឹកដោះគោ ឬ ទឹកដោះគោដែលគ្មានខ្លាញ់ ក្នុងកម្រិតសមរម្យ",
+    "🧂 កាត់បន្ថយអំបិល ស្ករ និងអាហារចៀនឆ្អិន",
+    "🥣 បរិភោគអាហារឱ្យបានទៀងទាត់ កុំដោះស្រាយដោយការអត់ឃ្លានយូរ",
+    "💧 ផឹកទឹកជាទៀងទាត់ ជាជាងភេសជ្ជៈផ្អែម",
+    "🍽 បែងចែកចានឱ្យមានបន្លែ ប្រូតេអ៊ីន និងកាបូអ៊ីដ្រាតគ្រប់គ្រាន់",
+]
+HEALTHY_KH_FOODS = ["ត្រីស្ទឹង និងត្រីដែលអាំង ឬ អាំងឆ្អិន", "បន្លែស្លឹកដូចជា ស្ពៃ ត្រកួន ម្រះ",
+                    "ស៊ុប ម្ជូរ និងសម្លឆ្អិនដោយមិនប្រើខ្លាញ់ច្រើន", "សណ្តែក និងដំឡូងជ្វា ដំឡូងកែវ",
+                    "ផ្លែឈើស្រស់ដូចជា ល្វា ស្វាយ ចេកឆ្អិន"]
+
+
+async def health_menu(u, c):
+    await u.message.reply_text(
+        "🩺 ការថែទាំសុខភាព\n"
+        "/exercise – គន្លឹះលំហាត់ប្រាណ\n"
+        "/diet – គន្លឹះរបបអាហារ\n"
+        "/bmr ភេទ អាយុ កម្ពស់(cm) ទម្ងន់(kg) – គណនា BMR\n"
+        "  ឧ. /bmr ប្រុស 25 170 65\n\n" + HEALTH_NOTE)
+
+
+async def exercise(u, c):
+    tips = random.sample(EXERCISE_TIPS, 4)
+    await u.message.reply_text("🏃 គន្លឹះលំហាត់ប្រាណ\n\n" + "\n".join(tips) + "\n\n" + HEALTH_NOTE)
+
+
+async def diet(u, c):
+    await u.message.reply_text("🥗 គន្លឹះរបបអាហារ\n\n" + "\n".join(DIET_TIPS)
+                               + "\n\n🍲 ម្ហូបសុខភាពខ្មែរ៖\n" + "\n".join(f"• {x}" for x in HEALTHY_KH_FOODS)
+                               + "\n\n" + HEALTH_NOTE)
+
+
+async def bmr(u, c):
+    if u.effective_chat.type != "private":
+        return await u.message.reply_text("🔒 សូមប្រើ /bmr ក្នុងការជជែកផ្ទាល់ជាមួយខ្ញុំ (private) ដើម្បីការពារព័ត៌មានផ្ទាល់ខ្លួន")
+    if len(c.args) != 4:
+        return await u.message.reply_text("ប្រើ៖ /bmr ភេទ អាយុ កម្ពស់(cm) ទម្ងន់(kg)\nឧ. /bmr ប្រុស 25 170 65")
+    sex, age, h, w = c.args[0].lower(), c.args[1], c.args[2], c.args[3]
+    if sex in ("ប្រុស", "m", "male"):
+        male = True
+    elif sex in ("ស្រី", "f", "female"):
+        male = False
+    else:
+        return await u.message.reply_text("ភេទត្រូវជា ប្រុស ឬ ស្រី")
+    try:
+        age, h, w = int(age), float(h), float(w)
+    except ValueError:
+        return await u.message.reply_text("អាយុ កម្ពស់ និងទម្ងន់ត្រូវជាលេខ")
+    if not (10 <= age <= 100 and 100 <= h <= 250 and 30 <= w <= 300):
+        return await u.message.reply_text("តម្លៃមិនស្ថិតក្នុងជួរសមស្រប (អាយុ 10–100, កម្ពស់ 100–250, ទម្ងន់ 30–300)")
+    val = 10 * w + 6.25 * h - 5 * age + (5 if male else -161)
+    await u.message.reply_text(
+        f"🔥 BMR (កាឡូរីដែលរាងកាយប្រើពេលសម្រាក): ~{val:,.0f} kcal/ថ្ងៃ\n"
+        "(គណនាតាមរូបមន្ត Mifflin-St Jeor)\n\n" + HEALTH_NOTE)
+
+
 HELP = """🤖 Koval Bot - បញ្ជី Command
 😄 ជជែក: /hello /joke /riddle /quote /roast /compliment /truth /dare /wouldyou /fact
-⚽ កីឡា: /fixtures\n🍲 ម្ហូប: /food\n📰 ព័ត៌មាន: /news /tech /sport /weather /exchange /gold /stock /crypto /today /holiday /trend
+⚽ កីឡា: /fixtures\n🍲 ម្ហូប: /food\n🇰🇭 ផ្សារហ៊ុនខ្មែរ: /khstock\n🩺 សុខភាព: /health /exercise /diet /bmr\n📰 ព័ត៌មាន: /news /tech /sport /weather /exchange /gold /stock /crypto /today /holiday /trend
 🎮 ល្បែង: /quiz /guess /dice /coin /rps /wordgame /math /story /poll /rank
 🛠 ឧបករណ៍: /calendar /translate /define /calc /convert /remind /timer /time /summary /search /ask
 👥 ក្រុម: /rules /welcome /birthday /admin /report /warn /mute /stats /daily /help"""
@@ -1099,7 +1183,7 @@ COMMANDS = {
     "rules": rules, "welcome": welcome, "birthday": birthday, "admin": admin_list, "report": report,
     "warn": warn, "mute": mute, "stats": stats, "daily": daily, "help": help_cmd, "start": help_cmd,
     "reveal": reveal,
-    "stock": stock, "fixtures": fixtures, "calendar": calendar_cmd, "food": food_cmd,
+    "stock": stock, "fixtures": fixtures, "calendar": calendar_cmd, "food": food_cmd, "khstock": khstock, "health": health_menu, "exercise": exercise, "diet": diet, "bmr": bmr,
 }
 
 
